@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <fstream>
+#include <unordered_set>
 #include <stdint.h>
 #include <openssl/md5.h>
 
@@ -15,14 +16,34 @@
 
 using namespace std;
 
+class Digest {
+public:
+  unsigned char *Value() {
+    return value_;
+  }
+  size_t Key() const {
+    return *(size_t *)value_;
+  }
+
+private:
+  unsigned char value_[MD5_DIGEST_LENGTH];
+};
+
+template <>
+class hash<Digest> : public unary_function<struct digest, size_t> {
+  size_t operator()(const Digest &digest) const {
+    return digest.Key();
+  }
+};
+
 void handle_data(const unsigned char *data, const uint64_t len) {
-  unsigned char digest[MD5_DIGEST_LENGTH];
+  Digest digest;
   uint64_t pos = 0;
   uint64_t dedup_len;
 
   while (pos < len) {
     dedup_len = pos + DEDUP_LEN > len ? len - pos : DEDUP_LEN;
-    MD5(data + pos, dedup_len, digest);
+    MD5(data + pos, dedup_len, digest.Value());
   }
 }
 
