@@ -13,28 +13,41 @@
 #include <openssl/md5.h>
 
 #define DEDUP_LEN 1024 // bytes
+#define NUM_BUCKS (1024 * 16)
 
 using namespace std;
 
 class Digest {
-public:
-  unsigned char *Value() {
-    return value_;
-  }
-  size_t Key() const {
-    return *(size_t *)value_;
-  }
+  public:
+    unsigned char *value() const {
+      return value_;
+    }
 
-private:
-  unsigned char value_[MD5_DIGEST_LENGTH];
+    size_t Key() const {
+      return *(size_t *)value_;
+    }
+
+  private:
+    unsigned char value_[MD5_DIGEST_LENGTH];
 };
 
-template <>
-class hash<Digest> : public unary_function<struct digest, size_t> {
-  size_t operator()(const Digest &digest) const {
-    return digest.Key();
-  }
-};
+namespace std {
+  template <>
+  struct hash<Digest> : public unary_function<Digest, size_t> {
+    size_t operator() (const Digest &digest) const {
+      return digest.Key();
+    }
+  };
+
+  template<>
+  struct equal_to<Digest> : binary_function<Digest, Digest, bool> {
+    bool operator() (const Digest &a, const Digest &b) const {
+      return 0 == memcmp(a.value(), b.value(), MD5_DIGEST_LENGTH);
+    }
+  };
+}
+
+unordered_set<Digest> index_set(NUM_BUCKS);
 
 void handle_data(const unsigned char *data, const uint64_t len) {
   Digest digest;
@@ -43,7 +56,8 @@ void handle_data(const unsigned char *data, const uint64_t len) {
 
   while (pos < len) {
     dedup_len = pos + DEDUP_LEN > len ? len - pos : DEDUP_LEN;
-    MD5(data + pos, dedup_len, digest.Value());
+    MD5(data + pos, dedup_len, digest.value());
+    index_set.insert(digest);
   }
 }
 
