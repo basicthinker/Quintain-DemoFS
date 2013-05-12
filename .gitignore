@@ -15,3 +15,15 @@
 *.exe
 *.out
 *.app
+
+# eclipse
+.project
+.cproject
+.settings/
+
+*.log
+Debug/
+*.ko
+*.mod.c
+*.o.cmd
+*.ko.cmd
