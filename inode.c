@@ -33,7 +33,7 @@ static const struct inode_operations quintain_dir_inode_operations;
 static struct backing_dev_info quintain_backing_dev_info = {
 	.name		= "quintain",
 	.ra_pages	= 0,	/* No readahead */
-	.capabilities	= BDI_CAP_NO_ACCT_AND_WRITEBACK |
+	.capabilities	= // BDI_CAP_NO_ACCT_AND_WRITEBACK |
 			  BDI_CAP_MAP_DIRECT | BDI_CAP_MAP_COPY |
 			  BDI_CAP_READ_MAP | BDI_CAP_WRITE_MAP | BDI_CAP_EXEC_MAP,
 };

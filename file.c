@@ -15,12 +15,12 @@
 #include <linux/mmdebug.h>
 #include <linux/page-flags.h>
 
+#include <linux/writeback.h>
 #include "quintain.h"
 
-static int __set_page_dirty_no_writeback(struct page *page)
-{
-	if (!PageDirty(page))
-		return !TestSetPageDirty(page);
+static int quintain_writepage(struct page *page, struct writeback_control *wbc) {
+	printk(KERN_INFO "[quintain] writepage: address = %p, wbc-nr_to_write = %ld, wbc-start/end = %lld/%lld",
+		page, wbc->nr_to_write, wbc->range_start, wbc->range_end);
 	return 0;
 }
 
@@ -47,9 +47,10 @@ quintain_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 
 const struct address_space_operations quintain_aops = {
 	.readpage	= simple_readpage,
+	.writepage	= quintain_writepage,
 	.write_begin	= simple_write_begin,
 	.write_end	= simple_write_end,
-	.set_page_dirty = __set_page_dirty_no_writeback,
+	//.set_page_dirty = __set_page_dirty_no_writeback,
 };
 
 const struct file_operations quintain_file_operations = {
