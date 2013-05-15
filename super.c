@@ -54,7 +54,7 @@ static int init_log(void)
 	log_pos = 0;
 	spin_lock_init(&log_lock);
 	log_filp = filp_open(LOG_PATH, O_RDWR | O_CREAT, 0755);
-    	if (IS_ERR(log_filp)) {
+    	if (IS_ERR_OR_NULL(log_filp)) {
 		printk(KERN_ERR "[quintain] failed to open log file: %ld\n", PTR_ERR(log_filp));
         	return PTR_ERR(log_filp);
     	}
@@ -63,7 +63,7 @@ static int init_log(void)
 
 static void destroy_log(void)
 {
-	if (log_filp)
+	if (!IS_ERR_OR_NULL(log_filp))
 		filp_close(log_filp, NULL);
 }
 
@@ -72,21 +72,23 @@ ssize_t log_append(const char __user *buf, size_t len)
         mm_segment_t oldfs = get_fs();
         ssize_t ret;
 
+	if (IS_ERR_OR_NULL(log_filp)) return 0;
+
         spin_lock(&log_lock);
 
+	set_fs(get_ds());
         ret = vfs_write(log_filp, (char *)&len, sizeof(len), &log_pos);
+        set_fs(oldfs);
         if (ret < 0) {
-                printk(KERN_ERR "[quintain] log_append failed to write length: pos = %lld\n",
-                        log_pos);
+                printk(KERN_ERR "[quintain] log_append failed to write length: pos = %lld, err = %ld\n",
+                        log_pos, ret);
                 goto out;
         }
 
-        set_fs(get_ds());
         ret = vfs_write(log_filp, buf, len, &log_pos);
-        set_fs(oldfs);
         if (ret < 0) {
-                printk(KERN_ERR "[quintain] log_append failed to write length: pos = %lld\n",
-                        log_pos);
+                printk(KERN_ERR "[quintain] log_append failed to write length: pos = %lld, err = %ld\n",
+                        log_pos, ret);
         }
 out:
         spin_unlock(&log_lock);
@@ -1583,6 +1585,7 @@ static void __exit exit_ext2_fs(void)
 	unregister_filesystem(&ext2_fs_type);
 	destroy_inodecache();
 	exit_ext2_xattr();
+	destroy_log();
 }
 
 module_init(init_ext2_fs)
