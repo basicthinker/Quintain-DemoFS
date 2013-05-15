@@ -1,72 +1,115 @@
-/* file.c: quintain MMU-based file operations
+/*
+ *  linux/fs/ext2/file.c
  *
- * Resizable simple ram filesystem for Linux.
+ * Copyright (c) 2013 Jinglei Ren <jinglei.ren@stanzax.org>
  *
- * Copyright (C) 2013 Jinglei Ren <jinglei.ren@stanzax.org>
- *               2000 Linus Torvalds.
- *               2000 Transmeta Corp.
+ * Copyright (C) 1992, 1993, 1994, 1995
+ * Remy Card (card@masi.ibp.fr)
+ * Laboratoire MASI - Institut Blaise Pascal
+ * Universite Pierre et Marie Curie (Paris VI)
  *
- * Usage limits added by David Gibson, Linuxcare Australia.
- * This file is released under the GPL.
+ *  from
+ *
+ *  linux/fs/minix/file.c
+ *
+ *  Copyright (C) 1991, 1992  Linus Torvalds
+ *
+ *  ext2 fs regular file handling primitives
+ *
+ *  64-bit file support on 64-bit platforms by Jakub Jelinek
+ * 	(jj@sunsite.ms.mff.cuni.cz)
  */
 
-#include <linux/fs.h>
-#include <linux/aio.h>
-#include <linux/mmdebug.h>
-#include <linux/page-flags.h>
+#include <linux/time.h>
+#include <linux/pagemap.h>
+#include <linux/quotaops.h>
+#include "ext2.h"
+#include "xattr.h"
+#include "acl.h"
 
-#include <linux/writeback.h>
-#include "quintain.h"
-
-static int quintain_writepage(struct page *page, struct writeback_control *wbc) {
-	printk(KERN_INFO "[quintain] writepage: address = %p, wbc-nr_to_write = %ld, wbc-start/end = %lld/%lld",
-		page, wbc->nr_to_write, wbc->range_start, wbc->range_end);
+/*
+ * Called when filp is released. This happens when all file descriptors
+ * for a single struct file are closed. Note that different open() calls
+ * for the same file yield different struct file structures.
+ */
+static int ext2_release_file (struct inode * inode, struct file * filp)
+{
+	if (filp->f_mode & FMODE_WRITE) {
+		mutex_lock(&EXT2_I(inode)->truncate_mutex);
+		ext2_discard_reservation(inode);
+		mutex_unlock(&EXT2_I(inode)->truncate_mutex);
+	}
 	return 0;
 }
 
-static ssize_t quintain_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
-		unsigned long nr_segs, loff_t pos)
+int ext2_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 {
-	struct file *filp = iocb->ki_filp;
-	struct inode *inode = filp->f_mapping->host;
-	ssize_t written = generic_file_aio_write(iocb, iov, nr_segs, pos);
-	printk(KERN_INFO "[quintain] aio_write:\t%lu\t%lld\t%lu\n",
-		inode->i_ino, pos, written);
-	return written;
+	int ret;
+	struct super_block *sb = file->f_mapping->host->i_sb;
+	struct address_space *mapping = sb->s_bdev->bd_inode->i_mapping;
+
+	ret = generic_file_fsync(file, start, end, datasync);
+	if (ret == -EIO || test_and_clear_bit(AS_EIO, &mapping->flags)) {
+		/* We don't really know where the IO error happened... */
+		ext2_error(sb, __func__,
+			   "detected IO error when writing metadata buffers");
+		ret = -EIO;
+	}
+	return ret;
 }
 
-static ssize_t
-quintain_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
-		loff_t *ppos, size_t len, unsigned int flags)
+ssize_t quintain_sync_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos)
 {
-	struct inode *inode = out->f_mapping->host;
-        printk(KERN_INFO "[quintain] splice_write:\t%lu\t%lld\t%lu\n",
-                inode->i_ino, *ppos, len);
-	return generic_file_splice_write(pipe, out, ppos, len, flags);
+	log_append(buf, len);
+	return do_sync_write(filp, buf, len, ppos);
 }
 
-const struct address_space_operations quintain_aops = {
-	.readpage	= simple_readpage,
-	.writepage	= quintain_writepage,
-	.write_begin	= simple_write_begin,
-	.write_end	= simple_write_end,
-	//.set_page_dirty = __set_page_dirty_no_writeback,
-};
-
-const struct file_operations quintain_file_operations = {
-	.read		= do_sync_read,
-	.aio_read	= generic_file_aio_read,
-	.write		= do_sync_write,
-	.aio_write	= quintain_file_aio_write,
-	.mmap		= generic_file_mmap,
-	.fsync		= noop_fsync,
-	.splice_read	= generic_file_splice_read,
-	.splice_write	= quintain_file_splice_write,
+/*
+ * We have mostly NULL's here: the current defaults are ok for
+ * the ext2 filesystem.
+ */
+const struct file_operations ext2_file_operations = {
 	.llseek		= generic_file_llseek,
+	.read		= do_sync_read,
+	.write		= quintain_sync_write, //do_sync_write,
+	.aio_read	= generic_file_aio_read,
+	.aio_write	= generic_file_aio_write,
+	.unlocked_ioctl = ext2_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= ext2_compat_ioctl,
+#endif
+	.mmap		= generic_file_mmap,
+	.open		= dquot_file_open,
+	.release	= ext2_release_file,
+	.fsync		= ext2_fsync,
+	.splice_read	= generic_file_splice_read,
+	.splice_write	= generic_file_splice_write,
 };
 
-const struct inode_operations quintain_file_inode_operations = {
-	.setattr	= simple_setattr,
-	.getattr	= simple_getattr,
+#ifdef CONFIG_EXT2_FS_XIP
+const struct file_operations ext2_xip_file_operations = {
+	.llseek		= generic_file_llseek,
+	.read		= xip_file_read,
+	.write		= xip_file_write,
+	.unlocked_ioctl = ext2_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= ext2_compat_ioctl,
+#endif
+	.mmap		= xip_file_mmap,
+	.open		= dquot_file_open,
+	.release	= ext2_release_file,
+	.fsync		= ext2_fsync,
 };
+#endif
 
+const struct inode_operations ext2_file_inode_operations = {
+#ifdef CONFIG_EXT2_FS_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
+	.listxattr	= ext2_listxattr,
+	.removexattr	= generic_removexattr,
+#endif
+	.setattr	= ext2_setattr,
+	.get_acl	= ext2_get_acl,
+	.fiemap		= ext2_fiemap,
+};
