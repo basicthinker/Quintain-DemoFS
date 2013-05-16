@@ -40,34 +40,56 @@
 #include "xip.h"
 
 #include <linux/spinlock.h>
+#include <linux/kernel.h>
 #include <asm/segment.h>
 #include <asm/uaccess.h>
 
-#define LOG_PATH "/mnt/log/ext2-quintain.log"
+#define LOG_PATH_PRE "/mnt/log/ext2-quintain.log."
+#define LOG_PATH_LEN 256
+#define LOG_FILE_SIZE 2000000000
 
 static struct file *log_filp;
+static char log_path[LOG_PATH_LEN];
+static int log_index;
 static loff_t log_pos;
 static spinlock_t log_lock;
 
-static int init_log(void)
+static inline int init_log(void)
 {
 	log_pos = 0;
+	log_index = 0;
 	spin_lock_init(&log_lock);
-	log_filp = filp_open(LOG_PATH, O_RDWR | O_CREAT, 0755);
-    	if (IS_ERR_OR_NULL(log_filp)) {
-		printk(KERN_ERR "[quintain] failed to open log file: %ld\n", PTR_ERR(log_filp));
+	sprintf(log_path, LOG_PATH_PRE "%d", log_index);
+	log_filp = filp_open(log_path, O_RDWR | O_CREAT, 0755);
+	if (IS_ERR_OR_NULL(log_filp)) {
+		printk(KERN_ERR "[quintain] failed to open log file %s: err = %ld\n",
+			log_path, PTR_ERR(log_filp));
         	return PTR_ERR(log_filp);
     	}
 	return 0;
 }
 
-static void destroy_log(void)
+static inline void destroy_log(void)
 {
 	if (!IS_ERR_OR_NULL(log_filp))
 		filp_close(log_filp, NULL);
 }
 
-ssize_t log_append(const char __user *buf, size_t len)
+static inline int __switch_log(void)
+{
+	destroy_log();
+	log_pos = 0;
+	sprintf(log_path, LOG_PATH_PRE "%d", ++log_index);
+	log_filp = filp_open(log_path, O_RDWR | O_CREAT, 0755);
+	if (IS_ERR_OR_NULL(log_filp)) {
+		printk(KERN_ERR "[quintain] failed to open log file %s: err = %ld\n",
+			log_path, PTR_ERR(log_filp));
+        	return PTR_ERR(log_filp);
+    	}
+	return 0;
+}
+
+ssize_t inline log_append(const char __user *buf, size_t len)
 {
         mm_segment_t oldfs = get_fs();
         ssize_t ret;
@@ -90,6 +112,9 @@ ssize_t log_append(const char __user *buf, size_t len)
                 printk(KERN_ERR "[quintain] log_append failed to write length: pos = %lld, err = %ld\n",
                         log_pos, ret);
         }
+
+	if (log_pos > LOG_FILE_SIZE)
+		__switch_log();
 out:
         spin_unlock(&log_lock);
 

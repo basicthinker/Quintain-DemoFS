@@ -849,7 +849,8 @@ ext2_direct_IO(int rw, struct kiocb *iocb, const struct iovec *iov,
 	struct inode *inode = mapping->host;
 	ssize_t ret;
 
-	printk(KERN_INFO "[quintain] direct_IO: nr_segs = %lu\n", nr_segs);
+	// too frequently invoked with nr_segs = 1
+	//printk(KERN_INFO "[quintain] direct_IO: nr_segs = %lu\n", nr_segs);
 
 	ret = blockdev_direct_IO(rw, iocb, inode, iov, offset, nr_segs,
 				 ext2_get_block);
