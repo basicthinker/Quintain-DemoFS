@@ -44,7 +44,7 @@
 #include <asm/segment.h>
 #include <asm/uaccess.h>
 
-#define LOG_PATH_PRE "/mnt/log/ext2-quintain.log."
+#define LOG_PATH_PRE "/mnt/ext2-quintain.log."
 #define LOG_PATH_LEN 256
 #define LOG_FILE_SIZE 2000000000
 

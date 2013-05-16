@@ -12,6 +12,7 @@
 #include <cstring>
 #include <cstdint>
 #include <openssl/md5.h>
+#include "easyzlib.h"
 
 #define NUM_BUCKS (1024 * 16)
 #define LOG_PATH_LEN 256
@@ -50,17 +51,33 @@ struct equal_to<Digest> : binary_function<Digest, Digest, bool> {
 
 unordered_set<Digest> index_set(NUM_BUCKS);
 uint64_t total_len = 0;
+uint64_t compress_len = 0;
+unsigned char *dest = NULL;
 
 void handle_data(const unsigned char *data, const uint64_t len,
     const uint64_t dedup_len) {
+  total_len += len;
+  
+  // deduplication
   Digest digest;
   uint64_t pos = 0;
   uint64_t digest_len = 0;
-  total_len += len;
   for (pos = 0; pos < len; pos += digest_len) {
     digest_len = pos + dedup_len > len ? len - pos : dedup_len;
     MD5(data + pos, digest_len, (unsigned char *) digest.value());
     index_set.insert(digest);
+  }
+
+  // compression
+  long dest_len = EZ_COMPRESSMAXDESTLENGTH(len);
+  dest = (unsigned char *)realloc(dest, dest_len);
+  int err = ezcompress(dest, &dest_len, data, len);
+  if (err) {
+    fprintf(stderr, "[analyser] failed to compress: err = %d\n", err);
+    compress_len += len;
+  } else {
+    //printf("\t%f", (double)dest_len/len);
+    compress_len += dest_len;
   }
 }
 
@@ -97,11 +114,13 @@ int main(int argc, char *argv[]) {
   } // for
 
   uint64_t rest_len = index_set.size() * dedup_len;
-  printf("Total file data length: %lu bytes\n", total_len);
+  printf("\nTotal file data length: %lu bytes\n", total_len);
   printf("Data length after dedup: %lu bytes\n", rest_len);
   printf("Dedup ratio: %f%% (dedup lenght = %lu)\n",
       (double)rest_len/total_len * 100, dedup_len);
+  printf("Compression ratio: %f%%\n\n", (double)compress_len/total_len * 100);
 
+  if (dest) free(dest);
   return 0;
 }
 
