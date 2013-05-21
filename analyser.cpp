@@ -14,7 +14,7 @@
 #include <openssl/md5.h>
 #include "easyzlib.h"
 
-#define NUM_BUCKS (1024 * 16)
+#define NUM_BUCKS (1024 * 1024 * 16)
 #define LOG_PATH_LEN 256
 
 using namespace std;
@@ -51,21 +51,24 @@ struct equal_to<Digest> : binary_function<Digest, Digest, bool> {
 
 unordered_set<Digest> index_set(NUM_BUCKS);
 uint64_t total_len = 0;
+uint64_t dedup_len = 0;
 uint64_t compress_len = 0;
 unsigned char *dest = NULL;
 
 void handle_data(const unsigned char *data, const uint64_t len,
-    const uint64_t dedup_len) {
+    const uint64_t chunk_size) {
   total_len += len;
-  
   // deduplication
   Digest digest;
   uint64_t pos = 0;
   uint64_t digest_len = 0;
   for (pos = 0; pos < len; pos += digest_len) {
-    digest_len = pos + dedup_len > len ? len - pos : dedup_len;
+    digest_len = pos + chunk_size > len ? len - pos : chunk_size;
     MD5(data + pos, digest_len, (unsigned char *) digest.value());
-    index_set.insert(digest);
+    if (index_set.find(digest) == index_set.end()) {
+      index_set.insert(digest);
+      dedup_len += digest_len;
+    }
   }
 
   // compression
@@ -83,12 +86,12 @@ void handle_data(const unsigned char *data, const uint64_t len,
 
 int main(int argc, char *argv[]) {
   if (argc < 4) {
-    printf("Usage: %s [log_path_prefix] [number_of_files] [dedup_length]\n", argv[0]);
+    printf("Usage: %s [log_path_prefix] [number_of_files] [chunk_size]\n", argv[0]);
     return -1;
   }
   const char *file_pre = argv[1];
   const int num_files = atoi(argv[2]);
-  const uint64_t dedup_len = atoi(argv[3]);
+  const uint64_t chunk_size = atoi(argv[3]);
 
   char file_name[LOG_PATH_LEN];
   for (int i = 0; i < num_files; ++i) {
@@ -102,9 +105,10 @@ int main(int argc, char *argv[]) {
       data = (char *) realloc(data, seg_len);
       log_file.read(data, seg_len);
       if (log_file) {
-        handle_data((unsigned char *) data, seg_len, dedup_len);
+        handle_data((unsigned char *) data, seg_len, chunk_size);
       } else {
-        printf("[Err] failed to read after %lu bytes.\n", total_len);
+        printf("[Err] failed to read %lu bytes after %lu bytes.\n",
+            seg_len, total_len);
         break;
       }
       log_file.read((char *) &seg_len, sizeof(seg_len));
@@ -113,11 +117,10 @@ int main(int argc, char *argv[]) {
     log_file.close();
   } // for
 
-  uint64_t rest_len = index_set.size() * dedup_len;
   printf("\nTotal file data length: %lu bytes\n", total_len);
-  printf("Data length after dedup: %lu bytes\n", rest_len);
+  printf("Data length after dedup: %lu bytes\n", dedup_len);
   printf("Dedup ratio: %f%% (dedup lenght = %lu)\n",
-      (double)rest_len/total_len * 100, dedup_len);
+      (double)dedup_len/total_len * 100, chunk_size);
   printf("Compression ratio: %f%%\n\n", (double)compress_len/total_len * 100);
 
   if (dest) free(dest);

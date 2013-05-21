@@ -57,13 +57,15 @@ int main(int argc, char *argv[]) {
 
   seg_len = (SEG_LEN >> 2) * 3;
   fill_data(data, seg_len, 2);
-  test_file.write((char *)&seg_len, sizeof(seg_len));
-  test_file.write(data, seg_len);
+  for (int i = 0; i < 2; ++i) {  
+    test_file.write((char *)&seg_len, sizeof(seg_len));
+    test_file.write(data, seg_len);
+  }
 
   printf("SEG_LEN = %d, NUM_CASES = %d\n", SEG_LEN, NUM_CASES);
   printf("total data:\t%lu\n", SEG_LEN * NUM_CASES + seg_len);
-  printf("dedup by half:\t%d\n", 7 * SEG_LEN);
-  printf("dedup by whole:\t%d\n", 9 * SEG_LEN);
+  printf("dedup by half:\t%d\t%d\n", 7 * SEG_LEN, 7 * SEG_LEN - (SEG_LEN >> 2));
+  printf("dedup by whole:\t%d\t%d\n", 9 * SEG_LEN, 9 * SEG_LEN - (SEG_LEN >> 2));
   test_file.close();
   return 0;
 }
